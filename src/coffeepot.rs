@@ -19,6 +19,7 @@ struct CoffeepotInternals {
     state: PotState,
     callback_guard: Option<Guard>,
     timer: timer::Timer,
+    state_cb: &'static (Fn(PotState) -> () + Send + Sync),
 }
 
 impl CoffeepotInternals {
@@ -32,6 +33,11 @@ impl CoffeepotInternals {
         }
     }
 
+    fn change_state(&mut self, new_state: PotState) {
+        self.cancel_callback();
+        self.state = new_state;
+        (self.state_cb)(new_state);
+    }
 }
 
 pub struct Coffeepot {
@@ -39,17 +45,22 @@ pub struct Coffeepot {
 }
 
 impl Coffeepot {
-    pub fn new() -> Self {
+    pub fn new(cb: &'static (Fn(PotState) -> () + Send + Sync)) -> Self {
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             callback_guard: None,
             timer: timer::Timer::new(),
+            state_cb: cb,
         };
-        Coffeepot { props: Arc::new(Mutex::new(pot)) }
+        Coffeepot {
+            props: Arc::new(Mutex::new(pot)),
+        }
     }
 
     pub fn clone(&self) -> Self {
-        Coffeepot { props: self.props.clone() }
+        Coffeepot {
+            props: self.props.clone(),
+        }
     }
 
     pub fn current_state(&self) -> PotState {
@@ -58,8 +69,7 @@ impl Coffeepot {
 
     pub fn activate(&self, time: Duration) {
         let mut attrs = self.props.lock().unwrap();
-        attrs.cancel_callback();
-        attrs.state = PotState::Active;
+        attrs.change_state(PotState::Active);
         let clone = self.clone();
         let guard = attrs.timer.schedule_with_delay(time, move || clone.inactivate());
         attrs.callback_guard = Some(guard);
@@ -70,8 +80,7 @@ impl Coffeepot {
         if attrs.state != PotState::Ready {
             return;
         }
-        attrs.cancel_callback();
-        attrs.state = PotState::Waiting;
+        attrs.change_state(PotState::Waiting);
         let clone = self.clone();
         let guard = attrs.timer.schedule_with_date(activation_time, move || clone.activate(time));
         attrs.callback_guard = Some(guard);
@@ -79,19 +88,17 @@ impl Coffeepot {
 
     pub fn inactivate(&self) {
         let mut attrs = self.props.lock().unwrap();
-        attrs.cancel_callback();
-        attrs.state = PotState::Idle;
+        attrs.change_state(PotState::Idle);
     }
 
     pub fn toggle_ready(&self) {
         let mut attrs = self.props.lock().unwrap();
         match attrs.state {
             PotState::Idle => {
-                attrs.state = PotState::Ready;
+                attrs.change_state(PotState::Ready);
             },
             PotState::Ready => {
-                attrs.cancel_callback();
-                attrs.state = PotState::Idle;
+                attrs.change_state(PotState::Idle);
             },
             _ => (),
         }
