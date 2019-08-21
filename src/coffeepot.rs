@@ -17,26 +17,26 @@ pub enum PotState {
 
 struct CoffeepotInternals {
     state: PotState,
-    callback_guard: Option<Guard>,
-    timer: timer::Timer,
-    state_cb: &'static (Fn(PotState) -> () + Send + Sync),
+    timer_guard: Option<Guard>,
+    clock: timer::Timer,
+    state_callback: &'static (Fn(PotState) -> () + Send + Sync),
 }
 
 impl CoffeepotInternals {
-    fn cancel_callback(&mut self) {
-        match &self.callback_guard {
+    fn cancel_timer(&mut self) {
+        match &self.timer_guard {
             Some(guard) => {
                 drop(guard);
-                self.callback_guard = None;
+                self.timer_guard = None;
             },
             _ => (),
         }
     }
 
     fn change_state(&mut self, new_state: PotState) {
-        self.cancel_callback();
+        self.cancel_timer();
         self.state = new_state;
-        (self.state_cb)(new_state);
+        (self.state_callback)(new_state);
     }
 }
 
@@ -48,9 +48,9 @@ impl Coffeepot {
     pub fn new(cb: &'static (Fn(PotState) -> () + Send + Sync)) -> Self {
         let pot = CoffeepotInternals {
             state: PotState::Idle,
-            callback_guard: None,
-            timer: timer::Timer::new(),
-            state_cb: cb,
+            timer_guard: None,
+            clock: timer::Timer::new(),
+            state_callback: cb,
         };
         Coffeepot {
             props: Arc::new(Mutex::new(pot)),
@@ -71,8 +71,8 @@ impl Coffeepot {
         let mut attrs = self.props.lock().unwrap();
         attrs.change_state(PotState::Active);
         let clone = self.clone();
-        let guard = attrs.timer.schedule_with_delay(time, move || clone.inactivate());
-        attrs.callback_guard = Some(guard);
+        let guard = attrs.clock.schedule_with_delay(time, move || clone.inactivate());
+        attrs.timer_guard = Some(guard);
     }
 
     pub fn activate_delayed<Tz: TimeZone>(&self, time: Duration, activation_time: DateTime<Tz>) {
@@ -82,8 +82,8 @@ impl Coffeepot {
         }
         attrs.change_state(PotState::Waiting);
         let clone = self.clone();
-        let guard = attrs.timer.schedule_with_date(activation_time, move || clone.activate(time));
-        attrs.callback_guard = Some(guard);
+        let guard = attrs.clock.schedule_with_date(activation_time, move || clone.activate(time));
+        attrs.timer_guard = Some(guard);
     }
 
     pub fn inactivate(&self) {
