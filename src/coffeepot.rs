@@ -34,7 +34,12 @@ impl CoffeepotInternals {
     }
 
     fn change_state(&mut self, new_state: PotState) {
+        // Cancel timer even if new state is the same, since a new timer will be
+        // instantiated if there is currently one
         self.cancel_timer();
+        if new_state == self.state {
+            return;
+        }
         self.state = new_state;
         (self.state_callback)(new_state);
     }
