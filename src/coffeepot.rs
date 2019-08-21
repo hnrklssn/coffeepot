@@ -7,8 +7,8 @@ use chrono::TimeZone;
 use std::sync::{Arc, Mutex};
 
 
-#[derive(PartialEq, Copy, Clone)]
-enum PotState {
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum PotState {
     Idle,
     Active,
     Waiting,
