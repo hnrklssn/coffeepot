@@ -4,7 +4,6 @@ use timer::Guard;
 use timer::Timer;
 use chrono::Duration;
 use std::sync::{Arc, Mutex};
-use std::fmt::Display;
 
 struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
     value: A,
@@ -14,7 +13,7 @@ struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
 }
 
 
-pub fn closure<A: Display + Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(default_value: A, f: B) -> Box<Fn(A) -> () + Send + Sync> {
+pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(default_value: A, f: B) -> Box<Fn(A) -> () + Send + Sync> {
     let bounce_time: Duration = Duration::milliseconds(10);
     let state = Arc::new(Mutex::new(DebounceData {
         value: default_value,

@@ -15,14 +15,14 @@ pub enum PotState {
     Ready,
 }
 
-struct CoffeepotInternals {
+struct CoffeepotInternals<B: Fn(PotState) + Send + 'static> {
     state: PotState,
     timer_guard: Option<Guard>,
     clock: timer::Timer,
-    state_callback: &'static (Fn(PotState) -> () + Send + Sync),
+    state_callback: B,
 }
 
-impl CoffeepotInternals {
+impl <B: Fn(PotState) + Send + 'static> CoffeepotInternals<B> {
     fn cancel_timer(&mut self) {
         match &self.timer_guard {
             Some(guard) => {
@@ -45,12 +45,12 @@ impl CoffeepotInternals {
     }
 }
 
-pub struct Coffeepot {
-    props: Arc<Mutex<CoffeepotInternals>>,
+pub struct Coffeepot<B: Fn(PotState) + Send + 'static> {
+    props: Arc<Mutex<CoffeepotInternals<B>>>,
 }
 
-impl Coffeepot {
-    pub fn new(cb: &'static (Fn(PotState) -> () + Send + Sync)) -> Self {
+impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
+    pub fn new(cb: B) -> Self {
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             timer_guard: None,
@@ -106,6 +106,14 @@ impl Coffeepot {
                 attrs.change_state(PotState::Idle);
             },
             _ => (),
+        }
+    }
+
+    pub fn toggle_active(&self) {
+        let mut attrs = self.props.lock().unwrap();
+        match attrs.state {
+            PotState::Active => attrs.change_state(PotState::Idle),
+            _ => attrs.change_state(PotState::Active),
         }
     }
 
