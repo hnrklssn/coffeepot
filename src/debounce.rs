@@ -1,9 +1,9 @@
-extern crate timer;
 extern crate chrono;
-use timer::Guard;
-use timer::Timer;
+extern crate timer;
 use chrono::Duration;
 use std::sync::{Arc, Mutex};
+use timer::Guard;
+use timer::Timer;
 
 struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
     value: A,
@@ -12,8 +12,10 @@ struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
     callback: B,
 }
 
-
-pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(default_value: A, f: B) -> Box<Fn(A) -> () + Send + Sync> {
+pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(
+    default_value: A,
+    f: B,
+) -> Box<Fn(A) -> () + Send + Sync> {
     let bounce_time: Duration = Duration::milliseconds(10);
     let state = Arc::new(Mutex::new(DebounceData {
         value: default_value,
@@ -42,5 +44,5 @@ pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync +
                 data.timer_guard = Some(guard);
             }
         }
-    })
+    });
 }

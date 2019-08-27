@@ -1,11 +1,10 @@
-extern crate timer;
 extern crate chrono;
-use timer::Guard;
-use chrono::Duration;
+extern crate timer;
 use chrono::DateTime;
+use chrono::Duration;
 use chrono::TimeZone;
 use std::sync::{Arc, Mutex};
-
+use timer::Guard;
 
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum PotState {
@@ -22,13 +21,13 @@ struct CoffeepotInternals<B: Fn(PotState) + Send + 'static> {
     state_callback: B,
 }
 
-impl <B: Fn(PotState) + Send + 'static> CoffeepotInternals<B> {
+impl<B: Fn(PotState) + Send + 'static> CoffeepotInternals<B> {
     fn cancel_timer(&mut self) {
         match &self.timer_guard {
             Some(guard) => {
                 drop(guard);
                 self.timer_guard = None;
-            },
+            }
             _ => (),
         }
     }
@@ -49,7 +48,7 @@ pub struct Coffeepot<B: Fn(PotState) + Send + 'static> {
     props: Arc<Mutex<CoffeepotInternals<B>>>,
 }
 
-impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
+impl<B: Fn(PotState) + Send + 'static> Coffeepot<B> {
     pub fn new(cb: B) -> Self {
         let pot = CoffeepotInternals {
             state: PotState::Idle,
@@ -76,7 +75,9 @@ impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
         let mut attrs = self.props.lock().unwrap();
         attrs.change_state(PotState::Active);
         let clone = self.clone();
-        let guard = attrs.clock.schedule_with_delay(time, move || clone.inactivate());
+        let guard = attrs
+            .clock
+            .schedule_with_delay(time, move || clone.inactivate());
         attrs.timer_guard = Some(guard);
     }
 
@@ -87,7 +88,9 @@ impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
         }
         attrs.change_state(PotState::Waiting);
         let clone = self.clone();
-        let guard = attrs.clock.schedule_with_date(activation_time, move || clone.activate(time));
+        let guard = attrs
+            .clock
+            .schedule_with_date(activation_time, move || clone.activate(time));
         attrs.timer_guard = Some(guard);
     }
 
@@ -101,10 +104,10 @@ impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
         match attrs.state {
             PotState::Idle => {
                 attrs.change_state(PotState::Ready);
-            },
+            }
             PotState::Ready => {
                 attrs.change_state(PotState::Idle);
-            },
+            }
             _ => (),
         }
     }
@@ -116,5 +119,4 @@ impl <B: Fn(PotState) + Send + 'static> Coffeepot<B> {
             _ => attrs.change_state(PotState::Active),
         }
     }
-
 }
