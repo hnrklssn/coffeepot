@@ -15,7 +15,7 @@ struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
 pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(
     default_value: A,
     f: B,
-) -> Box<Fn(A) -> () + Send + Sync> {
+) -> Box<dyn Fn(A) -> () + Send + Sync> {
     let bounce_time: Duration = Duration::milliseconds(10);
     let state = Arc::new(Mutex::new(DebounceData {
         value: default_value,
