@@ -1,12 +1,54 @@
 use std::error::Error;
 use std::io::stdin;
+use std::thread;
 mod coffeepot;
 mod debounce;
 use chrono::prelude::*;
 use coffeepot::{Coffeepot, PotState};
+use rumqtt::{MqttClient, MqttOptions, Notification, QoS, Receiver, ReconnectOptions};
+
+fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
+    let reconnection_options = ReconnectOptions::Always(10);
+    let mqtt_options = MqttOptions::new("test-coffeepot", url, port)
+        .set_keep_alive(10)
+        .set_inflight(3)
+        .set_request_channel_capacity(10)
+        .set_reconnect_opts(reconnection_options)
+        .set_clean_session(false);
+
+    let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
+    mqtt_client
+        .subscribe("coffeepot/actions", QoS::AtLeastOnce)
+        .unwrap();
+    (mqtt_client, notifications)
+}
+
+/** Allow actions to be injected from network for home automation */
+fn handle_notifications(coffeepot: Coffeepot, notifications: Receiver<Notification>) {
+    for notification in notifications {
+        match notification {
+            Notification::Publish(packet) => {
+                if packet.payload.len() < 1 {
+                    println!("payload empty!");
+                }
+                match packet.payload[0] as char {
+                    'a' => coffeepot.activate(chrono::Duration::seconds(2)),
+                    'i' => coffeepot.inactivate(),
+                    'd' => coffeepot.activate_delayed(
+                        chrono::Duration::seconds(5),
+                        Local::now() + FixedOffset::east(5),
+                    ),
+                    other => println!("unexpected input: {}", other),
+                }
+                println!("state: {:?}", coffeepot.current_state());
+            }
+            _ => (),
+        }
+    }
+}
 
 /** Allows actions to be injected from the terminal for testing purposes */
-fn demo<T: Fn(PotState) + Send + 'static>(coffeepot: Coffeepot<T>) -> Result<(), Box<dyn Error>> {
+fn demo(coffeepot: Coffeepot) -> Result<(), Box<dyn Error>> {
     let mut exit = false;
     while !exit {
         // Need empty string at start of every loop iteration, read_line appends
@@ -35,7 +77,25 @@ fn demo<T: Fn(PotState) + Send + 'static>(coffeepot: Coffeepot<T>) -> Result<(),
 #[cfg(not(target_arch = "arm"))]
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Hello, world!");
-    let coffeepot = Coffeepot::new(move |new_state| println!("state changed to {:?}", new_state));
+    let (tx, rx) = init_mqtt("test.mosquitto.org", 1883);
+    let coffeepot = Coffeepot::new({
+        let mut tx = tx;
+        move |new_state: PotState| {
+            println!("state changed to {:?}", new_state);
+            tx.publish(
+                "coffeepot/state",
+                QoS::AtLeastOnce,
+                false,
+                vec![new_state as u8],
+            )
+            .expect("mqtt publish failed");
+            println!("state changed to {:?}_____", new_state);
+        }
+    });
+    thread::spawn({
+        let coffeepot = coffeepot.clone();
+        move || handle_notifications(coffeepot, rx)
+    });
     demo(coffeepot)
 }
 
@@ -55,7 +115,6 @@ mod pi {
     use rppal::pwm::{Channel, Polarity, Pwm};
     use std::io::{stdout, Write};
     use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-    use std::thread;
     use std::time::Duration;
 
     // Gpio uses BCM pin numbering

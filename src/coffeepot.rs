@@ -3,25 +3,29 @@ extern crate timer;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::TimeZone;
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use timer::Guard;
 
 #[derive(PartialEq, Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum PotState {
-    Idle,
-    Active,
-    Waiting,
-    Ready,
+    Idle = 1,
+    Ready = 2,
+    Waiting = 3,
+    Active = 4,
+    Shutdown = 5,
 }
 
-struct CoffeepotInternals<B: Fn(PotState) + Send + 'static> {
+struct CoffeepotInternals {
     state: PotState,
     timer_guard: Option<Guard>,
     clock: timer::Timer,
-    state_callback: B,
+    tx: Sender<PotState>,
 }
 
-impl<B: Fn(PotState) + Send + 'static> CoffeepotInternals<B> {
+impl CoffeepotInternals {
     fn cancel_timer(&mut self) {
         match &self.timer_guard {
             Some(guard) => {
@@ -40,21 +44,43 @@ impl<B: Fn(PotState) + Send + 'static> CoffeepotInternals<B> {
             return;
         }
         self.state = new_state;
-        (self.state_callback)(new_state);
+        self.tx.send(new_state).unwrap();
     }
 }
 
-pub struct Coffeepot<B: Fn(PotState) + Send + 'static> {
-    props: Arc<Mutex<CoffeepotInternals<B>>>,
+/**
+ * Keeps the callback function to a single thread, and isolates the callback
+ * type from polluting all of the structs with trait bounds.
+ * Not strictly needed.
+ */
+fn callback_handler<B: FnMut(PotState) + Send + 'static>(
+    mut cb: B,
+) -> (Sender<PotState>, thread::JoinHandle<()>) {
+    let (tx, rx) = channel();
+    (
+        tx,
+        thread::spawn(move || loop {
+            let state = rx.recv().unwrap();
+            cb(state);
+            if state == PotState::Shutdown {
+                break;
+            }
+        }),
+    )
 }
 
-impl<B: Fn(PotState) + Send + 'static> Coffeepot<B> {
-    pub fn new(cb: B) -> Self {
+pub struct Coffeepot {
+    props: Arc<Mutex<CoffeepotInternals>>,
+}
+
+impl Coffeepot {
+    pub fn new<B: FnMut(PotState) + Send + 'static>(cb: B) -> Self {
+        let (tx, _) = callback_handler(cb);
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             timer_guard: None,
             clock: timer::Timer::new(),
-            state_callback: cb,
+            tx,
         };
         Coffeepot {
             props: Arc::new(Mutex::new(pot)),
