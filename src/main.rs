@@ -1,11 +1,11 @@
-use std::error::Error;
-use std::io::stdin;
-use std::thread;
 mod coffeepot;
 mod debounce;
 use chrono::prelude::*;
 use coffeepot::{Coffeepot, PotState};
 use rumqtt::{MqttClient, MqttOptions, Notification, QoS, Receiver, ReconnectOptions};
+use std::error::Error;
+use std::io::stdin;
+use std::thread;
 
 fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
     let reconnection_options = ReconnectOptions::Always(10);
@@ -74,6 +74,7 @@ fn demo(coffeepot: Coffeepot) -> Result<(), Box<dyn Error>> {
 
 /** This main function can be compiled and run on x86 machines to test the
  * state machine without any connected hardware */
+#[allow(dead_code)]
 #[cfg(not(target_arch = "arm"))]
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Hello, world!");
@@ -101,20 +102,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 /* ***** Pi hardware dependent stuff below here ******* */
 
-#[cfg(target_arch = "arm")]
-mod pi;
-
+#[allow(dead_code)]
 #[cfg(target_arch = "arm")]
 fn main() -> Result<(), Box<dyn Error>> {
-    pi.main()
+    pi::main()
 }
 
 #[cfg(target_arch = "arm")]
 mod pi {
+    use crate::coffeepot::{Coffeepot, PotState};
+    use crate::debounce;
     use rppal::gpio::{Gpio, Level};
     use rppal::pwm::{Channel, Polarity, Pwm};
+    use std::error::Error;
     use std::io::{stdout, Write};
     use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+    use std::thread;
     use std::time::Duration;
 
     // Gpio uses BCM pin numbering
@@ -172,7 +175,7 @@ mod pi {
     }
 
     /** This is the actual main function running in production on rpi hardware */
-    fn main() -> Result<(), Box<dyn Error>> {
+    pub fn main() -> Result<(), Box<dyn Error>> {
         println!("Hello, world!");
         let mut ready_input = Gpio::new()?.get(GPIO_READY_PIN)?.into_input_pulldown();
         let mut power_input = Gpio::new()?.get(GPIO_POWER_PIN)?.into_input_pulldown();
@@ -226,7 +229,7 @@ mod pi {
         power_input.set_async_interrupt(rppal::gpio::Trigger::Both, update_power)?;
         #[cfg(debug)]
         demo(coffeepot);
-        #[cfg(nog(debug))]
+        #[cfg(not(debug))]
         loop {}
         tx.send(Action::Exit)?;
         println!("waiting for pwm thread to shut down");
