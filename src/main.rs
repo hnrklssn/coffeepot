@@ -120,8 +120,9 @@ mod pi {
     use std::time::Duration;
 
     // Gpio uses BCM pin numbering
-    const GPIO_READY_PIN: u8 = 17;
-    const GPIO_POWER_PIN: u8 = 20;
+    const GPIO_READY_BUTTON_PIN: u8 = 17;
+    const GPIO_POWER_BUTTON_PIN: u8 = 22;
+    const GPIO_RELAY_CTRL_PIN: u8 = 27;
     const PWM_READY_LED_PIN: Channel = Channel::Pwm1;
     const PWM_POWER_LED_PIN: Channel = Channel::Pwm0;
 
@@ -178,8 +179,8 @@ mod pi {
     /** This is the actual main function running in production on rpi hardware */
     pub fn main() -> Result<(), Box<dyn Error>> {
         println!("Hello, world!");
-        let mut ready_input = Gpio::new()?.get(GPIO_READY_PIN)?.into_input_pulldown();
-        let mut power_input = Gpio::new()?.get(GPIO_POWER_PIN)?.into_input_pulldown();
+        let mut ready_input = Gpio::new()?.get(GPIO_READY_BUTTON_PIN)?.into_input_pulldown();
+        let mut power_input = Gpio::new()?.get(GPIO_POWER_BUTTON_PIN)?.into_input_pulldown();
 
         let (tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
         let power_led = Pwm::with_period(
