@@ -151,12 +151,10 @@ mod pi {
             true,
         )
         .expect("Could not setup pwm pin");
-        println!("pwm led: {:?}", led);
         let mut exit = false;
         while !exit {
             for x in (0..100).chain((0..100).rev()) {
                 led.set_duty_cycle((x as f64) / 100.0).unwrap();
-                println!("{}", x);
                 exit = match rx.recv_timeout(Duration::from_millis(10)) {
                     Ok(Action::Stop(brightness)) => {
                         led.set_duty_cycle(brightness).unwrap();

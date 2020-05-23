@@ -76,6 +76,8 @@ pub struct Coffeepot {
 impl Coffeepot {
     pub fn new<B: FnMut(PotState) + Send + 'static>(cb: B) -> Self {
         let (tx, _) = callback_handler(cb);
+        // send initial message with the starting state
+        tx.send(PotState::Idle).unwrap();
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             timer_guard: None,
