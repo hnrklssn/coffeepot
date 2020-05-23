@@ -102,7 +102,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 /* ***** Pi hardware dependent stuff below here ******* */
 
-#[allow(dead_code)]
 #[cfg(target_arch = "arm")]
 fn main() -> Result<(), Box<dyn Error>> {
     pi::main()
@@ -123,19 +122,23 @@ mod pi {
     // Gpio uses BCM pin numbering
     const GPIO_READY_PIN: u8 = 17;
     const GPIO_POWER_PIN: u8 = 20;
-    const PWM_READY_LED_PIN: Channel = Channel::Pwm0;
-    const PWM_POWER_LED_PIN: Channel = Channel::Pwm1;
+    const PWM_READY_LED_PIN: Channel = Channel::Pwm1;
+    const PWM_POWER_LED_PIN: Channel = Channel::Pwm0;
 
     fn ready_pwm_init(pwm: Channel) -> (Sender<Action>, thread::JoinHandle<()>) {
         let (tx, rx) = channel();
         (tx, thread::spawn(move || cycle_pwm(pwm, rx)))
     }
 
-    fn pwm_cycle_wait(rx: &Receiver<Action>) -> bool {
+    fn pwm_cycle_wait(led: &Pwm, rx: &Receiver<Action>) -> bool {
         match rx.recv() {
             Ok(Action::Start) => false,
+            Ok(Action::Stop(brightness)) => {
+                led.set_duty_cycle(brightness).unwrap();
+                pwm_cycle_wait(led, rx)
+            },
             Ok(Action::Exit) => true,
-            _ => pwm_cycle_wait(rx),
+            Err(_) => true,
         }
     }
 
@@ -155,9 +158,9 @@ mod pi {
                 led.set_duty_cycle((x as f64) / 100.0).unwrap();
                 println!("{}", x);
                 exit = match rx.recv_timeout(Duration::from_millis(10)) {
-                    Ok(Action::Stop(value)) => {
-                        led.set_duty_cycle(value).unwrap();
-                        pwm_cycle_wait(&rx)
+                    Ok(Action::Stop(brightness)) => {
+                        led.set_duty_cycle(brightness).unwrap();
+                        pwm_cycle_wait(&led, &rx)
                     }
                     Err(RecvTimeoutError::Timeout) => false,
                     Ok(Action::Start) => false,
@@ -196,17 +199,17 @@ mod pi {
                 println!("state changed to {:?}", new_state);
                 if new_state == PotState::Waiting {
                     tx.send(Action::Start).unwrap();
-                } else if new_state == PotState::Ready {
-                    tx.send(Action::Stop(0.9)).unwrap();
-                } else {
+                } else if new_state == PotState::Idle {
                     tx.send(Action::Stop(0.0)).unwrap();
+                } else {
+                    tx.send(Action::Stop(0.9)).unwrap();
                 }
 
-                if new_state == PotState::Active {
-                    power_led.set_duty_cycle(1.0).unwrap();
-                } else {
-                    power_led.set_duty_cycle(0.1).unwrap();
-                }
+                let power_brightness = match new_state {
+                    PotState::Idle | PotState::Active => 0.1,
+                    _ => 0.0,
+                };
+                power_led.set_duty_cycle(power_brightness).unwrap();
             }
         });
         let update_ready = debounce::closure(Level::Low, {
@@ -227,8 +230,8 @@ mod pi {
         });
         ready_input.set_async_interrupt(rppal::gpio::Trigger::Both, update_ready)?;
         power_input.set_async_interrupt(rppal::gpio::Trigger::Both, update_power)?;
-        #[cfg(debug)]
-        demo(coffeepot);
+        //#[cfg(debug)]
+        super::demo(coffeepot);
         #[cfg(not(debug))]
         loop {}
         tx.send(Action::Exit)?;
