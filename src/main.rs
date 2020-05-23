@@ -181,6 +181,7 @@ mod pi {
         println!("Hello, world!");
         let mut ready_input = Gpio::new()?.get(GPIO_READY_BUTTON_PIN)?.into_input_pulldown();
         let mut power_input = Gpio::new()?.get(GPIO_POWER_BUTTON_PIN)?.into_input_pulldown();
+        let mut relay_output = Gpio::new()?.get(GPIO_RELAY_CTRL_PIN)?.into_output();
 
         let (tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
         let power_led = Pwm::with_period(
@@ -209,6 +210,12 @@ mod pi {
                     _ => 0.0,
                 };
                 power_led.set_duty_cycle(power_brightness).unwrap();
+
+                let relay_level = match new_state {
+                    PotState::Active => Level::High,
+                    _ => Level::Low,
+                };
+                relay_output.write(relay_level);
             }
         });
         let update_ready = debounce::closure(Level::Low, {
