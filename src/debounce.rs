@@ -16,7 +16,7 @@ pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync +
     default_value: A,
     f: B,
 ) -> Box<dyn Fn(A) -> () + Send + Sync> {
-    let bounce_time: Duration = Duration::milliseconds(10);
+    let bounce_time: Duration = Duration::milliseconds(70);
     let state = Arc::new(Mutex::new(DebounceData {
         value: default_value,
         timer: Timer::new(),
