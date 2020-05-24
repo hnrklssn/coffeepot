@@ -7,7 +7,7 @@ use std::error::Error;
 use std::io::stdin;
 use std::thread;
 
-fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
+pub fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
     let reconnection_options = ReconnectOptions::Always(10);
     let mqtt_options = MqttOptions::new("test-coffeepot", url, port)
         .set_keep_alive(10)
@@ -30,14 +30,33 @@ fn handle_notifications(coffeepot: Coffeepot, notifications: Receiver<Notificati
             Notification::Publish(packet) => {
                 if packet.payload.len() < 1 {
                     println!("payload empty!");
+                    continue;
                 }
                 match packet.payload[0] as char {
                     'a' => coffeepot.activate(chrono::Duration::seconds(2)),
                     'i' => coffeepot.inactivate(),
-                    'd' => coffeepot.activate_delayed(
-                        chrono::Duration::seconds(5),
-                        Local::now() + FixedOffset::east(5),
-                    ),
+                    'd' => {
+                        let MINUTES = 60;
+                        if packet.payload.len() == 1 {
+                            coffeepot.activate_delayed(
+                                chrono::Duration::minutes(45),
+                                Local::now() + FixedOffset::east(5 * MINUTES),
+                                );
+                                continue;
+                        };
+                        let delay_str: Result<&str, Box<dyn Error>> = std::str::from_utf8(&packet.payload[1..])
+                            .map_err(|e| e.into());
+                        match delay_str.and_then(|s| s.parse::<i32>().map_err(|e| e.into())) {
+                            Ok(delay) => {
+                                println!("delay {}", delay);
+                                coffeepot.activate_delayed(
+                                    chrono::Duration::minutes(90),
+                                    Local::now() + FixedOffset::east(delay * MINUTES),
+                                    )
+                            },
+                            Err(e) => println!("vec -> string -> int failed: {}", e)
+                        }
+                    },
                     other => println!("unexpected input: {}", other),
                 }
                 println!("state: {:?}", coffeepot.current_state());
@@ -118,6 +137,7 @@ mod pi {
     use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
     use std::thread;
     use std::time::Duration;
+    use rumqtt::QoS;
 
     // Gpio uses BCM pin numbering
     const GPIO_READY_BUTTON_PIN: u8 = 17;
@@ -183,7 +203,7 @@ mod pi {
         let mut power_input = Gpio::new()?.get(GPIO_POWER_BUTTON_PIN)?.into_input_pulldown();
         let mut relay_output = Gpio::new()?.get(GPIO_RELAY_CTRL_PIN)?.into_output();
 
-        let (tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
+        let (pwm_tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
         let power_led = Pwm::with_period(
             PWM_POWER_LED_PIN,
             Duration::from_millis(5),
@@ -192,17 +212,19 @@ mod pi {
             true,
         )
         .expect("Could not setup pwm power pin");
+        let (mut mqtt_tx, mqtt_rx) = crate::init_mqtt("bosch.hnrklssn.se", 1883);
 
         let coffeepot = Coffeepot::new({
-            let tx = tx.clone();
+            let pwm_tx = pwm_tx.clone();
+            let mut mqtt_tx = mqtt_tx;
             move |new_state| {
                 println!("state changed to {:?}", new_state);
                 if new_state == PotState::Waiting {
-                    tx.send(Action::Start).unwrap();
+                    pwm_tx.send(Action::Start).unwrap();
                 } else if new_state == PotState::Idle {
-                    tx.send(Action::Stop(0.0)).unwrap();
+                    pwm_tx.send(Action::Stop(0.0)).unwrap();
                 } else {
-                    tx.send(Action::Stop(0.9)).unwrap();
+                    pwm_tx.send(Action::Stop(0.9)).unwrap();
                 }
 
                 let power_brightness = match new_state {
@@ -216,6 +238,12 @@ mod pi {
                     _ => Level::Low,
                 };
                 relay_output.write(relay_level);
+                mqtt_tx.publish(
+                    "coffeepot/state",
+                    QoS::AtLeastOnce,
+                    false,
+                    vec![new_state as u8],
+                    ).expect("mqtt publish failed");
             }
         });
         let update_ready = debounce::closure(Level::Low, {
@@ -236,11 +264,15 @@ mod pi {
         });
         ready_input.set_async_interrupt(rppal::gpio::Trigger::Both, update_ready)?;
         power_input.set_async_interrupt(rppal::gpio::Trigger::Both, update_power)?;
+        thread::spawn({
+            let coffeepot = coffeepot.clone();
+            move || crate::handle_notifications(coffeepot, mqtt_rx)
+        });
         //#[cfg(debug)]
         super::demo(coffeepot);
         #[cfg(not(debug))]
         loop {}
-        tx.send(Action::Exit)?;
+        pwm_tx.send(Action::Exit)?;
         println!("waiting for pwm thread to shut down");
         pwm_thread.join().unwrap();
         println!("exiting");
