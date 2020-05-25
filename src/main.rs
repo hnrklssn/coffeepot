@@ -3,17 +3,30 @@ mod debounce;
 use chrono::prelude::*;
 use coffeepot::{Coffeepot, PotState};
 use rumqtt::{MqttClient, MqttOptions, Notification, QoS, Receiver, ReconnectOptions};
+use rumqtt::mqttoptions::SecurityOptions;
+use std::env;
 use std::error::Error;
 use std::io::stdin;
 use std::thread;
 
 pub fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
+    let creds = env::var_os("COFFEEPOT_USER")
+        .and_then(|user_os| user_os.into_string().ok())
+        .and_then(|user|
+                  env::var_os("COFFEEPOT_PASS")
+                  .and_then(|pass_os| pass_os.into_string().ok())
+                  .map(|pass|
+                       SecurityOptions::UsernamePassword(user,pass)
+                      )
+    ).unwrap_or(SecurityOptions::None);
+
     let reconnection_options = ReconnectOptions::Always(10);
-    let mqtt_options = MqttOptions::new("test-coffeepot", url, port)
+    let mut mqtt_options = MqttOptions::new("coffeepot", url, port)
         .set_keep_alive(10)
         .set_inflight(3)
         .set_request_channel_capacity(10)
         .set_reconnect_opts(reconnection_options)
+        .set_security_opts(creds)
         .set_clean_session(false);
 
     let (mut mqtt_client, notifications) = MqttClient::start(mqtt_options).unwrap();
@@ -132,12 +145,12 @@ mod pi {
     use crate::debounce;
     use rppal::gpio::{Gpio, Level};
     use rppal::pwm::{Channel, Polarity, Pwm};
+    use rumqtt::QoS;
     use std::error::Error;
     use std::io::{stdout, Write};
     use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
     use std::thread;
     use std::time::Duration;
-    use rumqtt::QoS;
 
     // Gpio uses BCM pin numbering
     const GPIO_READY_BUTTON_PIN: u8 = 17;
@@ -198,7 +211,6 @@ mod pi {
 
     /** This is the actual main function running in production on rpi hardware */
     pub fn main() -> Result<(), Box<dyn Error>> {
-        println!("Hello, world!");
         let mut ready_input = Gpio::new()?.get(GPIO_READY_BUTTON_PIN)?.into_input_pulldown();
         let mut power_input = Gpio::new()?.get(GPIO_POWER_BUTTON_PIN)?.into_input_pulldown();
         let mut relay_output = Gpio::new()?.get(GPIO_RELAY_CTRL_PIN)?.into_output();
