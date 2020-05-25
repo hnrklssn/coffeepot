@@ -111,7 +111,7 @@ impl Coffeepot {
 
     pub fn activate_delayed<Tz: TimeZone>(&self, time: Duration, activation_time: DateTime<Tz>) {
         let mut attrs = self.props.lock().unwrap();
-        if attrs.state != PotState::Ready {
+        if attrs.state != PotState::Ready && attrs.state != PotState::Waiting {
             return;
         }
         attrs.change_state(PotState::Waiting);
