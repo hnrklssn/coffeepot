@@ -21,7 +21,7 @@ pub fn init_mqtt(url: &str, port: u16) -> (MqttClient, Receiver<Notification>) {
     ).unwrap_or(SecurityOptions::None);
 
     let reconnection_options = ReconnectOptions::Always(10);
-    let mut mqtt_options = MqttOptions::new("coffeepot", url, port)
+    let mqtt_options = MqttOptions::new("coffeepot", url, port)
         .set_keep_alive(10)
         .set_inflight(3)
         .set_request_channel_capacity(10)
@@ -191,12 +191,16 @@ mod pi {
                 led.set_duty_cycle((x as f64) / 100.0).unwrap();
                 exit = match rx.recv_timeout(Duration::from_millis(10)) {
                     Ok(Action::Stop(brightness)) => {
-                        led.set_duty_cycle(brightness).unwrap();
+                        led.set_duty_cycle(brightness)
+                            .expect("could not set ready led duty cycle");
                         pwm_cycle_wait(&led, &rx)
                     }
                     Err(RecvTimeoutError::Timeout) => false,
                     Ok(Action::Start) => false,
-                    Err(_) => true,
+                    Err(e) => {
+                        println!("error while receiving in pwm thread: {}", e);
+                        true
+                    },
                     Ok(Action::Exit) => true,
                 }
             }
@@ -215,7 +219,11 @@ mod pi {
         let mut power_input = Gpio::new()?.get(GPIO_POWER_BUTTON_PIN)?.into_input_pulldown();
         let mut relay_output = Gpio::new()?.get(GPIO_RELAY_CTRL_PIN)?.into_output();
 
-        let (pwm_tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
+        //let (pwm_tx, pwm_thread) = ready_pwm_init(PWM_READY_LED_PIN);
+        let (pwm_tx, pwm_rx) = channel();
+        // have to clone before first recv_timeout to avoid panic bug
+        let pwm_tx2 = pwm_tx.clone();
+        let pwm_thread = thread::spawn(move || cycle_pwm(PWM_READY_LED_PIN, pwm_rx));
         let power_led = Pwm::with_period(
             PWM_POWER_LED_PIN,
             Duration::from_millis(5),
@@ -224,26 +232,33 @@ mod pi {
             true,
         )
         .expect("Could not setup pwm power pin");
-        let (mut mqtt_tx, mqtt_rx) = crate::init_mqtt("bosch.hnrklssn.se", 1883);
+        let (mqtt_tx, mqtt_rx) = crate::init_mqtt("bosch.hnrklssn.se", 1883);
 
         let coffeepot = Coffeepot::new({
-            let pwm_tx = pwm_tx.clone();
+            let pwm_tx = pwm_tx2;
             let mut mqtt_tx = mqtt_tx;
             move |new_state| {
                 println!("state changed to {:?}", new_state);
-                if new_state == PotState::Waiting {
-                    pwm_tx.send(Action::Start).unwrap();
-                } else if new_state == PotState::Idle {
-                    pwm_tx.send(Action::Stop(0.0)).unwrap();
-                } else {
-                    pwm_tx.send(Action::Stop(0.9)).unwrap();
-                }
+                    let result = if new_state == PotState::Waiting {
+                        pwm_tx.send(Action::Start)
+                    } else if new_state == PotState::Idle {
+                        pwm_tx.send(Action::Stop(0.0))
+                    } else {
+                        pwm_tx.send(Action::Stop(0.9))
+                    };
+                    match result {
+                        Err(e) => {
+                            std::panic!("error sending to pwm: {}", e);
+                        },
+                        _ => (),
+                    }
 
                 let power_brightness = match new_state {
                     PotState::Idle | PotState::Active => 0.1,
                     _ => 0.0,
                 };
-                power_led.set_duty_cycle(power_brightness).unwrap();
+                power_led.set_duty_cycle(power_brightness)
+                    .expect("could not set duty cycle of power led");
 
                 let relay_level = match new_state {
                     PotState::Active => Level::High,
@@ -280,9 +295,11 @@ mod pi {
             let coffeepot = coffeepot.clone();
             move || crate::handle_notifications(coffeepot, mqtt_rx)
         });
-        //#[cfg(debug)]
-        super::demo(coffeepot);
-        #[cfg(not(debug))]
+        // make sure main thread dies if pwm thread fails
+        pwm_tx.send(Action::Stop(0.0)).expect("pwm thread crashed on startup");
+        #[cfg(debug_assertions)]
+        super::demo(coffeepot).expect("demo failed");
+        #[cfg(not(debug_assertions))]
         loop {}
         pwm_tx.send(Action::Exit)?;
         println!("waiting for pwm thread to shut down");

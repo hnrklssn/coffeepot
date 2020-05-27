@@ -77,7 +77,7 @@ impl Coffeepot {
     pub fn new<B: FnMut(PotState) + Send + 'static>(cb: B) -> Self {
         let (tx, _) = callback_handler(cb);
         // send initial message with the starting state
-        tx.send(PotState::Idle).unwrap();
+        tx.send(PotState::Idle).expect("error sending initial idle state");
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             timer_guard: None,
