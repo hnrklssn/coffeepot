@@ -115,6 +115,7 @@ impl Coffeepot {
             return;
         }
         attrs.change_state(PotState::Waiting);
+        println!("activation time set to {:#?}", activation_time);
         let clone = self.clone();
         let guard = attrs
             .clock
@@ -132,10 +133,10 @@ impl Coffeepot {
         match attrs.state {
             PotState::Idle => {
                 attrs.change_state(PotState::Ready);
-            }
-            PotState::Ready => {
+            },
+            PotState::Ready | PotState::Waiting => {
                 attrs.change_state(PotState::Idle);
-            }
+            },
             _ => (),
         }
     }

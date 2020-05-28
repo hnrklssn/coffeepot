@@ -46,7 +46,7 @@ There are 4 states:
  
 Pressing the `power` button in `Active` sets the state to `Idle`.
 Pressing it in any other state sets the state to `Active`.
-Pressing the `ready` button in `Idle` sets the state to `Ready`, while pressing it in `Ready` sets it back to `Idle`.
+Pressing the `ready` button in `Idle` sets the state to `Ready`, while pressing it in `Ready` or `Waiting` sets it back to `Idle`.
 `Waiting` can only be entered by receiving a delayed activation command over MQTT while in `Ready`.
 The received delayed activation command specifies the number of minutes to spend in `Waiting` before continuing to `Active`,
 as calculated by the automation server in relation to the next alarm.
