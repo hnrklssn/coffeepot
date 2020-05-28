@@ -148,6 +148,8 @@ mod pi {
     use rumqtt::QoS;
     use std::error::Error;
     use std::io::{stdout, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
     use std::thread;
     use std::time::Duration;
@@ -202,6 +204,9 @@ mod pi {
                         true
                     },
                     Ok(Action::Exit) => true,
+                };
+                if exit {
+                    break;
                 }
             }
         }
@@ -297,13 +302,25 @@ mod pi {
         });
         // make sure main thread dies if pwm thread fails
         pwm_tx.send(Action::Stop(0.0)).expect("pwm thread crashed on startup");
+
         #[cfg(debug_assertions)]
         super::demo(coffeepot).expect("demo failed");
         #[cfg(not(debug_assertions))]
-        loop {}
+        {
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let shutdown2 = shutdown.clone();
+            ctrlc::set_handler(move || {
+                println!("received Ctrl+C!");
+                shutdown2.store(true, Ordering::Relaxed);
+            })
+            .expect("Error setting Ctrl-C handler");
+            while !shutdown.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
         pwm_tx.send(Action::Exit)?;
         println!("waiting for pwm thread to shut down");
-        pwm_thread.join().unwrap();
+        pwm_thread.join().expect("joining pwm thread failed");
         println!("exiting");
         Ok(())
     }
