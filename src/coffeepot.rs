@@ -29,6 +29,7 @@ impl CoffeepotInternals {
     fn cancel_timer(&mut self) {
         match &self.timer_guard {
             Some(guard) => {
+                debug!("cancelling coffeepot timer");
                 drop(guard);
                 self.timer_guard = None;
             }
@@ -37,6 +38,7 @@ impl CoffeepotInternals {
     }
 
     fn change_state(&mut self, new_state: PotState) {
+        debug!("changing coffeepot state to {:?}", new_state);
         // Cancel timer even if new state is the same, since a new timer will be
         // instantiated if there is currently one
         self.cancel_timer();
@@ -61,8 +63,10 @@ fn callback_handler<B: FnMut(PotState) + Send + 'static>(
         tx,
         thread::spawn(move || loop {
             let state = rx.recv().unwrap();
+            debug!("received coffeepot state {:?}", state);
             cb(state);
             if state == PotState::Shutdown {
+                info!("exiting coffeepot callback handler loop");
                 break;
             }
         }),
@@ -77,7 +81,9 @@ impl Coffeepot {
     pub fn new<B: FnMut(PotState) + Send + 'static>(cb: B) -> Self {
         let (tx, _) = callback_handler(cb);
         // send initial message with the starting state
-        tx.send(PotState::Idle).expect("error sending initial idle state");
+        tx.send(PotState::Idle)
+            .map_err(|_| error!("error sending initial idle state"))
+            .expect("error sending initial idle state");
         let pot = CoffeepotInternals {
             state: PotState::Idle,
             timer_guard: None,
@@ -96,11 +102,13 @@ impl Coffeepot {
     }
 
     pub fn current_state(&self) -> PotState {
+        debug!("fetching current state");
         self.props.lock().unwrap().state
     }
 
     pub fn activate(&self, time: Duration) {
         let mut attrs = self.props.lock().unwrap();
+        info!("activating for {}", time);
         attrs.change_state(PotState::Active);
         let clone = self.clone();
         let guard = attrs
@@ -112,10 +120,11 @@ impl Coffeepot {
     pub fn activate_delayed<Tz: TimeZone>(&self, time: Duration, activation_time: DateTime<Tz>) {
         let mut attrs = self.props.lock().unwrap();
         if attrs.state != PotState::Ready && attrs.state != PotState::Waiting {
+            debug!("got activate delayed in non-ready state");
             return;
         }
         attrs.change_state(PotState::Waiting);
-        println!("activation time set to {:#?}", activation_time);
+        info!("activation time set to {:#?}", activation_time);
         let clone = self.clone();
         let guard = attrs
             .clock
@@ -125,11 +134,13 @@ impl Coffeepot {
 
     pub fn inactivate(&self) {
         let mut attrs = self.props.lock().unwrap();
+        info!("inactivating");
         attrs.change_state(PotState::Idle);
     }
 
     pub fn toggle_ready(&self) {
         let mut attrs = self.props.lock().unwrap();
+        info!("toggling ready");
         match attrs.state {
             PotState::Idle => {
                 attrs.change_state(PotState::Ready);
@@ -137,12 +148,13 @@ impl Coffeepot {
             PotState::Ready | PotState::Waiting => {
                 attrs.change_state(PotState::Idle);
             },
-            _ => (),
+            _ => warn!("ready toggle invalid in current state"),
         }
     }
 
     pub fn toggle_active(&self) {
         let mut attrs = self.props.lock().unwrap();
+        info!("toggling active");
         match attrs.state {
             PotState::Active => attrs.change_state(PotState::Idle),
             _ => attrs.change_state(PotState::Active),

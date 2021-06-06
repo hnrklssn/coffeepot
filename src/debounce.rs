@@ -4,6 +4,7 @@ use chrono::Duration;
 use std::sync::{Arc, Mutex};
 use timer::Guard;
 use timer::Timer;
+use std::fmt::Debug;
 
 struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
     value: A,
@@ -12,7 +13,7 @@ struct DebounceData<A, B: FnMut(A) + Send + Sync + 'static> {
     callback: B,
 }
 
-pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync + 'static>(
+pub fn closure<A: Eq + Copy + Send + Sync + Debug + 'static, B: FnMut(A) + Send + Sync + 'static>(
     default_value: A,
     f: B,
 ) -> Box<dyn Fn(A) -> () + Send + Sync> {
@@ -25,20 +26,29 @@ pub fn closure<A: Eq + Copy + Send + Sync + 'static, B: FnMut(A) + Send + Sync +
     }));
     return Box::new(move |new_value| {
         let mut data = state.lock().unwrap();
+        debug!("debouncing - new value: {:?} state: {:?}", new_value, data.value);
         if data.value != new_value {
             if new_value != default_value {
                 data.value = new_value;
                 match &mut data.timer_guard {
-                    Some(guard) => drop(guard),
-                    None => (&mut data.callback)(new_value),
+                    Some(guard) => {
+                        debug!("state changed to {:?} during debounce, resetting", new_value);
+                        drop(guard);
+                    },
+                    None => {
+                        debug!("state changed to {:?} without debounce clash", new_value);
+                        (&mut data.callback)(new_value);
+                    },
                 }
                 data.timer_guard = None;
             } else {
                 data.value = new_value;
                 let state_ref = state.clone();
+                debug!("debouncing for {}", bounce_time);
                 let guard = data.timer.schedule_with_delay(bounce_time, move || {
                     let mut data = state_ref.lock().unwrap();
                     data.timer_guard = None;
+                    debug!("debounced {:?}", new_value);
                     (&mut data.callback)(new_value);
                 });
                 data.timer_guard = Some(guard);
